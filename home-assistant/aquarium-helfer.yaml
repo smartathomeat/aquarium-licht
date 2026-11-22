@@ -1,0 +1,16 @@
+input_boolean:
+  aquarium_automatik:
+    name: Aquarium Automatik
+  aquarium_wolkensimulation:
+    name: Aquarium Wolkensimulation
+  aquarium_mondlicht:
+    name: Aquarium Mondlicht
+
+input_number:
+  aquarium_intensitaet:
+    name: Aquarium Intensität
+    min: 0
+    max: 100
+    step: 5
+    mode: slider
+    unit_of_measurement: "%"

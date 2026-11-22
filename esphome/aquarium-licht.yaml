@@ -1,0 +1,242 @@
+# Lokaler Tagesverlauf für das smartathome-Aquarium.
+esphome:
+  name: aquarium-licht
+  friendly_name: Aquarium Licht
+  compile_process_limit: 2
+  includes:
+    - aquarium_profile.h
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: aquarium_lokal_berechnen
+
+esp32:
+  board: esp32dev
+
+logger:
+
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret aquarium_api_key
+
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret aquarium_api_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s
+  ap:
+    ssid: "Aquarium-Licht Fallback"
+    password: !secret aquarium_fallback_password
+
+captive_portal:
+
+output:
+  - platform: ledc
+    pin: GPIO16
+    id: pwm_weiss
+    frequency: 1000 Hz
+  - platform: ledc
+    pin: GPIO17
+    id: pwm_rot
+    frequency: 1000 Hz
+  - platform: ledc
+    pin: GPIO18
+    id: pwm_blau
+    frequency: 1000 Hz
+
+light:
+  - platform: monochromatic
+    name: "Weiss"
+    id: licht_weiss
+    output: pwm_weiss
+    gamma_correct: 1.4
+    default_transition_length: 3s
+    restore_mode: ALWAYS_OFF
+  - platform: monochromatic
+    name: "Rot"
+    id: licht_rot
+    output: pwm_rot
+    gamma_correct: 1.4
+    default_transition_length: 3s
+    restore_mode: ALWAYS_OFF
+  - platform: monochromatic
+    name: "Blau"
+    id: licht_blau
+    output: pwm_blau
+    gamma_correct: 1.4
+    default_transition_length: 3s
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: wifi_signal
+    name: "WLAN Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "Laufzeit"
+
+
+  # Einstellungen werden nur bei gueltigen HA-Zustandsmeldungen aktualisiert.
+  # Bei Verbindungsverlust bleiben die letzten Werte im ESP erhalten.
+  - platform: homeassistant
+    id: ha_aquarium_intensitaet
+    entity_id: input_number.aquarium_intensitaet
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (std::isfinite(x)) {
+              id(aq_intensitaet) = x < 0 ? 0 : (x > 100 ? 100 : x);
+            }
+        - script.execute: aquarium_lokal_berechnen
+  - platform: template
+    name: "Lokale Regelzyklen"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: return id(aq_regelzyklen);
+
+button:
+  - platform: restart
+    name: "Neustart"
+
+# Die Tageskurve wird ausschliesslich auf diesem ESP ausgefuehrt.
+# Ohne WLAN/HA laeuft eine einmal synchronisierte Uhr weiter.
+# Nach Kaltstart ohne erreichbare Zeitquelle bleibt Automatiklicht sicher aus.
+globals:
+  - id: aq_automatik
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  - id: aq_intensitaet
+    type: float
+    restore_value: true
+    initial_value: '100.0'
+  - id: aq_mondlicht
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  - id: aq_wolken
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  - id: aq_regelzyklen
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+time:
+  - platform: sntp
+    id: aquarium_uhr
+    timezone: Europe/Vienna
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - 2.pool.ntp.org
+    on_time_sync:
+      then:
+        - script.execute: aquarium_lokal_berechnen
+  # SNTP und Home Assistant synchronisieren dieselbe Systemuhr.
+  - platform: homeassistant
+    id: aquarium_ha_uhr
+    timezone: Europe/Vienna
+    on_time_sync:
+      then:
+        - script.execute: aquarium_lokal_berechnen
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_aquarium_automatik
+    entity_id: input_boolean.aquarium_automatik
+    internal: true
+    trigger_on_initial_state: true
+    on_state:
+      then:
+        - lambda: id(aq_automatik) = x;
+        - script.execute: aquarium_lokal_berechnen
+  - platform: homeassistant
+    id: ha_aquarium_mondlicht
+    entity_id: input_boolean.aquarium_mondlicht
+    internal: true
+    trigger_on_initial_state: true
+    on_state:
+      then:
+        - lambda: id(aq_mondlicht) = x;
+        - script.execute: aquarium_lokal_berechnen
+  - platform: homeassistant
+    id: ha_aquarium_wolken
+    entity_id: input_boolean.aquarium_wolkensimulation
+    internal: true
+    trigger_on_initial_state: true
+    on_state:
+      then:
+        - lambda: id(aq_wolken) = x;
+        - script.execute: aquarium_lokal_berechnen
+  - platform: template
+    name: "Uhrzeit gueltig"
+    entity_category: diagnostic
+    lambda: return id(aquarium_uhr).now().is_valid();
+
+text_sensor:
+  - platform: template
+    name: "Lokale Uhrzeit"
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      auto now = id(aquarium_uhr).now();
+      if (!now.is_valid()) return {"nicht synchronisiert"};
+      return now.strftime("%d.%m.%Y %H:%M:%S");
+  - platform: template
+    name: "Lichtsteuerung"
+    update_interval: 30s
+    lambda: |-
+      if (!id(aq_automatik)) return {"Handbetrieb"};
+      if (!id(aquarium_uhr).now().is_valid()) return {"Warte auf Uhrzeit - Licht aus"};
+      return {"ESP lokal - Tagesverlauf 09-17 Uhr"};
+
+interval:
+  - interval: 30s
+    then:
+      - script.execute: aquarium_lokal_berechnen
+
+script:
+  - id: aquarium_lokal_berechnen
+    mode: restart
+    then:
+      - lambda: |-
+          // Handbetrieb wird auch ohne Home Assistant respektiert.
+          if (!id(aq_automatik)) return;
+          const auto local = id(aquarium_uhr).now();
+          AquariumProfile target = {{0, 0, 0}};
+          if (local.is_valid()) {
+            const double minute = local.hour * 60.0 + local.minute + local.second / 60.0;
+            const int date_seed = local.year * 10000 + local.month * 100 + local.day_of_month;
+            target = aquarium_profile(minute, date_seed, id(aq_intensitaet),
+                                      id(aq_mondlicht), id(aq_wolken));
+            ++id(aq_regelzyklen);
+          }
+          // Unter zwei Bedienprozent werden die DIM-Ausgaenge wirklich ausgeschaltet.
+          // Gamma 1,4 bleibt ausschliesslich im ESPHome-Lichtkanal.
+          auto apply = [](esphome::light::LightState *channel, int percent) {
+            const bool was_on = channel->remote_values.is_on();
+            const int previous = static_cast<int>(channel->remote_values.get_brightness() * 100.0f + 0.5f);
+            if (percent < 2) {
+              if (was_on) {
+                auto call = channel->turn_off();
+                call.set_transition_length(30000);
+                call.perform();
+              }
+            } else if (!was_on || previous != percent) {
+              auto call = channel->turn_on();
+              call.set_brightness(percent / 100.0f);
+              call.set_transition_length(30000);
+              call.perform();
+            }
+          };
+          apply(id(licht_weiss), target.channel[0]);
+          apply(id(licht_rot), target.channel[1]);
+          apply(id(licht_blau), target.channel[2]);

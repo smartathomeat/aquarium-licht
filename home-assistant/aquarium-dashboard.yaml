@@ -1,0 +1,182 @@
+title: Aquarium
+views:
+- title: Aquariumlicht
+  path: licht
+  type: sections
+  max_columns: 3
+  sections:
+  - type: grid
+    column_span: 3
+    cards:
+    - type: heading
+      heading: Tagesverlauf 09–17 Uhr · direkt auf dem ESP
+      icon: mdi:weather-sunset
+      grid_options:
+        columns: full
+    - type: entities
+      title: Automatik
+      show_header_toggle: false
+      entities:
+      - entity: input_boolean.aquarium_automatik
+        name: Tagesverlauf aktiv
+      - entity: input_number.aquarium_intensitaet
+        name: Gesamtintensität
+      - entity: input_boolean.aquarium_wolkensimulation
+        name: Sanfte Wolkendurchgänge
+      - entity: input_boolean.aquarium_mondlicht
+        name: Mondlicht 17–19 Uhr
+      grid_options:
+        columns: 12
+    - type: markdown
+      content: "**Täglich von 09 bis 17 Uhr · läuft direkt auf dem ESP**\n\n09:00–09:45 · Rötlicher Sonnenaufgang\
+        \  \n09:45–16:15 · Tageslicht mit sanften Wolken  \n16:15–17:00 · Sonnenuntergang\n\nDas optionale\
+        \ Mondlicht leuchtet bei eingeschalteter Funktion von 17 bis 19 Uhr mit 2 % Blau.\n\nBei WLAN-\
+        \ oder HA-Ausfall läuft der Zeitplan mit den zuletzt übernommenen Einstellungen weiter. Nach vollständigem\
+        \ Stromausfall braucht der ESP einmal eine Zeitverbindung; bis dahin bleibt das Licht sicher aus."
+      grid_options:
+        columns: 12
+  - type: grid
+    cards:
+    - type: light
+      entity: light.aquarium_licht_weiss
+      name: Weiß
+      grid_options:
+        columns: 12
+        rows: 5
+  - type: grid
+    cards:
+    - type: light
+      entity: light.aquarium_licht_rot
+      name: Rot
+      grid_options:
+        columns: 12
+        rows: 5
+  - type: grid
+    cards:
+    - type: light
+      entity: light.aquarium_licht_blau
+      name: Blau
+      grid_options:
+        columns: 12
+        rows: 5
+  - type: grid
+    column_span: 3
+    cards:
+    - type: entities
+      title: Lokale Steuerung & Verbindung
+      show_header_toggle: false
+      entities:
+      - entity: sensor.aquarium_licht_lichtsteuerung
+        name: Steuerung
+      - entity: sensor.aquarium_licht_lokale_uhrzeit
+        name: Uhrzeit im ESP
+      - entity: binary_sensor.aquarium_licht_uhrzeit_gueltig
+        name: Uhrzeit synchronisiert
+      - entity: sensor.aquarium_licht_lokale_regelzyklen
+        name: Lokale Regelzyklen
+      - entity: sensor.aquarium_licht_wlan_signal
+        name: WLAN-Signal
+      - entity: sensor.aquarium_licht_laufzeit
+        name: Laufzeit
+      grid_options:
+        columns: 12
+- type: panel
+  path: himmel
+  title: Himmel
+  cards:
+  - type: markdown
+    text_only: true
+    content: |
+      {%- set clock = strptime(states('sensor.aquarium_licht_lokale_uhrzeit'), '%d.%m.%Y %H:%M:%S', none) -%}
+      {%- set control = states('sensor.aquarium_licht_lichtsteuerung') -%}
+      {%- set phase = 'offline' -%}
+      {%- if has_value('sensor.aquarium_licht_lichtsteuerung') and has_value('light.aquarium_licht_weiss') and has_value('light.aquarium_licht_rot') and has_value('light.aquarium_licht_blau') -%}
+        {%- if control == 'Handbetrieb' -%}
+          {%- set phase = 'manual' -%}
+        {%- elif clock is none or not is_state('binary_sensor.aquarium_licht_uhrzeit_gueltig', 'on') -%}
+          {%- set phase = 'waiting' -%}
+        {%- else -%}
+          {%- set m = clock.hour * 60 + clock.minute + clock.second / 60 -%}
+          {%- set seed = clock.year * 10000 + clock.month * 100 + clock.day -%}
+          {%- set intensity = states('input_number.aquarium_intensitaet') | float(none) -%}
+          {%- if 1020 <= m < 1140 and is_state('input_boolean.aquarium_mondlicht', 'on') -%}
+            {%- set phase = 'moon' -%}
+          {%- elif m < 540 or m >= 1020 or intensity == 0 -%}
+            {%- set phase = 'night' -%}
+          {%- elif m < 585 -%}
+            {%- set phase = 'dawn' -%}
+          {%- elif m >= 975 -%}
+            {%- set phase = 'sunset' -%}
+          {%- else -%}
+            {%- set cloudy = ((m - (660 + seed % 21)) | abs < 6) or ((m - (780 + (seed * 7) % 25)) | abs < 8) or ((m - (910 + (seed * 3) % 21)) | abs < 7) -%}
+            {%- set phase = 'clouds' if is_state('input_boolean.aquarium_wolkensimulation', 'on') and cloudy else 'sun' -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endif -%}
+      {%- set looks = {
+        'dawn': ['Sonnenaufgang','Das Aquarium erwacht','#263955','#887493','#ffc18f','#ffe0ac',420,269],
+        'sun': ['Sonne','Tageslicht','#113d64','#5389a4','#e1d4ad','#fff5c9',619,160],
+        'clouds': ['Wolken','Ein Wolkendurchgang dimmt das Aquariumlicht','#1d334f','#5c748c','#bac0ce','#d9e5ef',620,151],
+        'sunset': ['Sonnenuntergang','Das Licht wird langsam wärmer','#262040','#8c526d','#faa77d','#ffe0ab',648,272],
+        'moon': ['Mondlicht','Das Aquarium leuchtet sanft blau','#101a38','#293b68','#7185a5','#e4effa',623,148],
+        'night': ['Nacht','Die Aquariumbeleuchtung ruht','#071329','#182c47','#405c73','#dce9f6',623,150],
+        'manual': ['Handbetrieb','Die Beleuchtung wird manuell gesteuert','#182936','#3f5c66','#789398','#dae8ef',610,152],
+        'waiting': ['Uhrzeit fehlt','Warte auf die Uhr des Aquarium-ESP','#182936','#3f5c66','#789398','#dae8ef',610,152],
+        'offline': ['Aquarium nicht erreichbar','Die aktuelle Lichtphase ist nicht verfügbar','#182936','#3f5c66','#789398','#dae8ef',610,152]
+      }[phase] -%}
+      {%- set sky -%}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 520" width="1024" height="520">
+        <defs>
+          <linearGradient id="sky" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop stop-color="{{ looks[2] }}"/><stop offset=".54" stop-color="{{ looks[3] }}"/><stop offset="1" stop-color="{{ looks[4] }}"/>
+          </linearGradient>
+          <linearGradient id="water" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop stop-color="{{ looks[3] }}"/><stop offset=".33" stop-color="#163743"/><stop offset="1" stop-color="#071e27"/>
+          </linearGradient>
+          <linearGradient id="textShade" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop stop-color="#071923" stop-opacity="0"/><stop offset="1" stop-color="#071923" stop-opacity=".94"/>
+          </linearGradient>
+          <radialGradient id="glow"><stop stop-color="{{ looks[5] }}" stop-opacity=".69"/><stop offset="1" stop-color="{{ looks[5] }}" stop-opacity="0"/></radialGradient>
+          <radialGradient id="cloud"><stop stop-color="#e6edf3" stop-opacity=".60"/><stop offset="1" stop-color="#ccd8e7" stop-opacity="0"/></radialGradient>
+          <pattern id="ripples" width="100" height="13" patternUnits="userSpaceOnUse">
+            <path d="M0 1h62m16 6h22M24 11h31" stroke="#e9f3fe" stroke-opacity=".11" fill="none"/>
+          </pattern>
+        </defs>
+        <rect width="1024" height="365" fill="url(#sky)"/>
+        {%- if phase in ['moon','night'] %}
+          <path d="M78 86h2m48 89h2m43 -61h2m61 55h2m77 -72h2m54 36h2m73 -47h2m47 10h2m61 57h2m94 -77h2m79 53h2m56 -32h2m58 84h2m52 -57h2" stroke="#f2f7ff" stroke-width="2" stroke-opacity=".68" stroke-linecap="round"/>
+        {%- endif %}
+        {%- if phase in ['dawn','sun','clouds','sunset','moon','night'] %}
+          <ellipse cx="{{ looks[6] }}" cy="{{ looks[7] }}" rx="155" ry="124" fill="url(#glow)" opacity="{{ '.33' if phase == 'night' else '1' }}"/>
+          <circle cx="{{ looks[6] }}" cy="{{ looks[7] }}" r="{{ 25 if phase in ['moon','night'] else 36 }}" fill="{{ looks[5] }}" opacity="{{ '.44' if phase in ['night','clouds'] else '1' }}"/>
+        {%- endif %}
+        {%- if phase in ['dawn','sun','clouds','sunset'] %}
+          <g opacity="{{ '.94' if phase == 'clouds' else '.47' }}">
+            <ellipse cx="245" cy="184" rx="222" ry="37" fill="url(#cloud)"/>
+            <ellipse cx="311" cy="166" rx="158" ry="44" fill="url(#cloud)"/>
+            <ellipse cx="687" cy="141" rx="194" ry="34" fill="url(#cloud)"/>
+            <ellipse cx="762" cy="173" rx="216" ry="43" fill="url(#cloud)"/>
+            {%- if phase == 'clouds' %}<animateTransform attributeName="transform" type="translate" values="-100 0;170 6;-100 0" dur="50s" repeatCount="indefinite"/>{%- endif %}
+          </g>
+        {%- endif %}
+        <path d="M0 307L70 287 136 290 207 278 265 298 341 305 402 299 475 311 579 314 626 305 685 309 748 283 818 287 910 267 1024 286V370H0Z" fill="#0f3241" opacity=".65"/>
+        <path d="M0 325L108 311 170 315 231 308 364 325 454 321 554 333 649 328 756 315 803 314 888 296 973 307 1024 302V370H0Z" fill="#112f3b"/>
+        <rect y="343" width="1024" height="177" fill="url(#water)"/>
+        <rect y="344" width="1024" height="176" fill="url(#ripples)"/>
+        {%- if phase in ['dawn','sun','clouds','sunset','moon'] %}
+          <ellipse cx="{{ looks[6] }}" cy="345" rx="190" ry="47" fill="url(#glow)" opacity=".73"/>
+        {%- endif %}
+        <rect y="346" width="1024" height="174" fill="url(#textShade)"/>
+        <circle cx="52" cy="49" r="4.5" fill="#9ce4d4"/>
+        <g font-family="system-ui, sans-serif" fill="#f3f9f8">
+          <text x="67" y="55" font-size="15" font-weight="650" letter-spacing="4">AQUARIUM</text>
+          <text x="46" y="441" font-size="{{ 47 if phase == 'offline' else 57 }}" font-weight="600" letter-spacing="-2">{{ looks[0] }}</text>
+          <text x="49" y="476" font-size="18" fill="#d6e9eb">{{ looks[1] }}</text>
+          {%- if clock and phase not in ['waiting','offline'] %}
+            <text x="976" y="443" font-size="32" text-anchor="end" font-weight="500">{{ clock.strftime('%H:%M') }}</text>
+            <text x="976" y="472" font-size="13" text-anchor="end" fill="#c8dde0">Aquarium-Uhr</text>
+          {%- endif %}
+        </g>
+      </svg>
+      {%- endset -%}
+      <img alt="Aquarium · {{ looks[0] }}{% if clock and phase not in ['waiting','offline'] %} · {{ clock.strftime('%H:%M') }}{% endif %}" src="data:image/svg+xml,{{ sky | urlencode }}" style="display:block;width:100%;max-height:calc(100dvh - 112px);object-fit:contain;" />
